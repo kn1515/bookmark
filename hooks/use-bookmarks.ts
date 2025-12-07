@@ -1,6 +1,6 @@
 import { useState } from "react";
 import useSWR from "swr";
-import { Bookmark } from "@/app/db/schema";
+import { Bookmark as BookmarkType } from "@/app/db/schema";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -16,16 +16,23 @@ export const useBookmarks = (
   mutateTopics?: () => void
 ) => {
   // SWRを使用してブックマークデータを取得・キャッシュ
-  const { data, error, mutate } = useSWR<Bookmark[]>(
+  const { data, error, mutate } = useSWR<BookmarkType[]>(
     topicId ? `/api/bookmarks?topicId=${topicId}` : null,
     fetcher
   );
 
-  const [editingBookmark, setEditingBookmark] = useState<Bookmark | null>(null);
+  const [editingBookmark, setEditingBookmark] = useState<BookmarkType | null>(
+    null
+  );
   const [bookmarkForm, setBookmarkForm] = useState({
     topicId: topicId || "",
     url: "",
     description: "",
+  });
+
+  const [bulkForm, setBulkForm] = useState({
+    topicId: topicId || "",
+    urls: "",
   });
 
   // 前回のtopicIdを追跡して、変更時にフォームを更新
@@ -33,14 +40,16 @@ export const useBookmarks = (
   if (topicId !== prevTopicId) {
     setPrevTopicId(topicId);
     setBookmarkForm((prev) => ({ ...prev, topicId: topicId || "" }));
+    setBulkForm((prev) => ({ ...prev, topicId: topicId || "" }));
   }
 
   const resetBookmarkForms = () => {
     setBookmarkForm({ topicId: topicId || "", url: "", description: "" });
     setEditingBookmark(null);
+    setBulkForm({ topicId: topicId || "", urls: "" });
   };
 
-  const openEditBookmark = (bookmark: Bookmark) => {
+  const openEditBookmark = (bookmark: BookmarkType) => {
     setEditingBookmark(bookmark);
     setBookmarkForm({
       topicId: bookmark.topicId,
@@ -106,6 +115,38 @@ export const useBookmarks = (
     }
   };
 
+  /**
+   * 複数のURLを一括でブックマークとして作成する
+   * 改行区切りのURLテキストを解析して個別のブックマークを作成
+   */
+  const handleBulkCreate = async () => {
+    const urls = bulkForm.urls.split("\n").filter((url) => url.trim());
+
+    try {
+      const response = await fetch("/api/bookmarks/bulk", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          urls: urls.map((url) => url.trim()),
+          topicId: bulkForm.topicId,
+        }),
+      });
+
+      if (response.ok) {
+        await mutate();
+        if (mutateTopics) await mutateTopics();
+        resetBookmarkForms();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error creating bulk bookmarks:", error);
+      return false;
+    }
+  };
+
   const handleDeleteBookmark = async (bookmarkId: string) => {
     try {
       const response = await fetch(`/api/bookmarks/${bookmarkId}`, {
@@ -134,6 +175,8 @@ export const useBookmarks = (
     // フォーム状態
     bookmarkForm,
     setBookmarkForm,
+    bulkForm,
+    setBulkForm,
     editingBookmark,
 
     // 操作関数
@@ -141,6 +184,7 @@ export const useBookmarks = (
     resetBookmarkForms,
     handleCreateBookmark,
     handleUpdateBookmark,
+    handleBulkCreate,
     handleDeleteBookmark,
     mutateBookmarks: mutate,
   };
